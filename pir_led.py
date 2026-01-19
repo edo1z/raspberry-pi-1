@@ -2,7 +2,7 @@ import RPi.GPIO as GPIO
 import time
 
 GPIO.setmode(GPIO.BCM)
-GPIO.setup(4, GPIO.IN)   # PIRセンサ（入力）
+GPIO.setup(4, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)   # PIRセンサ（入力、プルダウン）
 GPIO.setup(17, GPIO.OUT) # LED（出力）
 
 try:
