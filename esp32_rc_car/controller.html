@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ESP32 RC Car Controller</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      user-select: none;
+    }
+    body {
+      font-family: Arial, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      margin: 0;
+      background: #1a1a2e;
+      color: #fff;
+    }
+    h1 {
+      margin-bottom: 10px;
+    }
+    .status {
+      margin-bottom: 20px;
+      padding: 10px 20px;
+      background: #16213e;
+      border-radius: 5px;
+    }
+    .status.connected {
+      background: #1b4332;
+    }
+    .status.error {
+      background: #7f1d1d;
+    }
+    .controller {
+      display: grid;
+      grid-template-columns: repeat(3, 80px);
+      grid-template-rows: repeat(3, 80px);
+      gap: 10px;
+    }
+    .btn {
+      width: 80px;
+      height: 80px;
+      border: none;
+      border-radius: 10px;
+      font-size: 24px;
+      cursor: pointer;
+      background: #0f3460;
+      color: #fff;
+      transition: background 0.1s;
+    }
+    .btn:hover {
+      background: #e94560;
+    }
+    .btn:active, .btn.active {
+      background: #e94560;
+      transform: scale(0.95);
+    }
+    .btn.stop {
+      background: #7f1d1d;
+    }
+    .btn.stop:hover, .btn.stop:active, .btn.stop.active {
+      background: #dc2626;
+    }
+    .empty {
+      visibility: hidden;
+    }
+    .log {
+      margin-top: 20px;
+      width: 280px;
+      height: 100px;
+      background: #16213e;
+      border-radius: 5px;
+      padding: 10px;
+      overflow-y: auto;
+      font-size: 12px;
+      font-family: monospace;
+    }
+    .settings {
+      margin-top: 20px;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+    .settings input {
+      padding: 8px;
+      border: none;
+      border-radius: 5px;
+      width: 180px;
+    }
+    .settings button {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 5px;
+      background: #0f3460;
+      color: #fff;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <h1>ESP32 RC Car</h1>
+  <div class="status" id="status">未接続</div>
+
+  <div class="controller">
+    <div class="empty"></div>
+    <button class="btn" id="forward">▲</button>
+    <div class="empty"></div>
+
+    <button class="btn" id="left">◀</button>
+    <button class="btn stop" id="stop">■</button>
+    <button class="btn" id="right">▶</button>
+
+    <div class="empty"></div>
+    <button class="btn" id="backward">▼</button>
+    <div class="empty"></div>
+  </div>
+
+  <div class="log" id="log"></div>
+
+  <div class="settings">
+    <input type="text" id="ip" value="192.168.4.1" placeholder="ESP32 IP Address">
+    <button onclick="testConnection()">接続テスト</button>
+  </div>
+
+  <script>
+    const buttons = ['forward', 'backward', 'left', 'right', 'stop'];
+    const log = document.getElementById('log');
+    const status = document.getElementById('status');
+    let baseUrl = '';
+
+    function getBaseUrl() {
+      return 'http://' + document.getElementById('ip').value;
+    }
+
+    function addLog(message) {
+      const time = new Date().toLocaleTimeString();
+      log.innerHTML = `[${time}] ${message}<br>` + log.innerHTML;
+    }
+
+    function setStatus(text, type) {
+      status.textContent = text;
+      status.className = 'status ' + type;
+    }
+
+    async function sendCommand(command) {
+      const url = getBaseUrl() + '/' + command;
+      try {
+        const response = await fetch(url, { mode: 'cors' });
+        const text = await response.text();
+        addLog(text);
+        setStatus('接続中', 'connected');
+      } catch (error) {
+        addLog('Error: ' + error.message);
+        setStatus('通信エラー', 'error');
+      }
+    }
+
+    async function testConnection() {
+      addLog('接続テスト中...');
+      try {
+        const response = await fetch(getBaseUrl() + '/', { mode: 'cors' });
+        if (response.ok) {
+          setStatus('接続OK', 'connected');
+          addLog('接続成功!');
+        }
+      } catch (error) {
+        setStatus('接続失敗', 'error');
+        addLog('接続失敗: ' + error.message);
+      }
+    }
+
+    // ボタンイベント（クリック）
+    buttons.forEach(cmd => {
+      const btn = document.getElementById(cmd);
+      btn.addEventListener('click', () => sendCommand(cmd));
+    });
+
+    // キーボード操作
+    const keyMap = {
+      'ArrowUp': 'forward',
+      'ArrowDown': 'backward',
+      'ArrowLeft': 'left',
+      'ArrowRight': 'right',
+      ' ': 'stop',
+      'w': 'forward',
+      's': 'backward',
+      'a': 'left',
+      'd': 'right'
+    };
+
+    document.addEventListener('keydown', (e) => {
+      const cmd = keyMap[e.key];
+      if (cmd) {
+        e.preventDefault();
+        document.getElementById(cmd).classList.add('active');
+        sendCommand(cmd);
+      }
+    });
+
+    document.addEventListener('keyup', (e) => {
+      const cmd = keyMap[e.key];
+      if (cmd) {
+        document.getElementById(cmd).classList.remove('active');
+      }
+    });
+
+    addLog('コントローラー準備完了');
+    addLog('ESP32のWi-Fi (ESP32-RC-Car) に接続してください');
+  </script>
+</body>
+</html>
