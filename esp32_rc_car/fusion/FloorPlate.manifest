@@ -1,0 +1,10 @@
+{
+    "autodeskProduct": "Fusion",
+    "type": "script",
+    "author": "",
+    "description": {
+        "": "RC Car Floor Plate - ESP32, Motor Driver, Battery Box holder"
+    },
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}
