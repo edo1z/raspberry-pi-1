@@ -1,5 +1,5 @@
 # Fusion 360 Python Script - RC Car Floor Plate
-# シンプル版：爪なし
+# 5mm厚、電池ボックス下にザグリ付き
 
 import adsk.core, adsk.fusion, traceback
 
@@ -18,7 +18,7 @@ def run(context):
         # パラメータ
         floor_length = mm(180)
         floor_width = mm(80)
-        floor_thickness = mm(3)
+        floor_thickness = mm(5)  # 5mmに変更
 
         # ESP32 寸法（縦向き配置: 長さ57mmがY方向）
         esp32_length = mm(57)   # Y方向（縦）
@@ -36,8 +36,17 @@ def run(context):
         m3_hole_diameter = mm(3.5)
 
         # 配線用長穴（X方向に短く、Y方向に長い）
-        cable_hole_length = mm(10)  # X方向
+        cable_hole_length = mm(5)   # X方向（細く）
         cable_hole_width = mm(60)   # Y方向
+
+        # スペーサー用長穴（中央に配置）
+        spacer_slot_width = mm(3.5)   # M3用
+        spacer_slot_length = mm(60)   # Y方向
+        spacer_slot_spacing = mm(44)  # X方向の間隔
+
+        # ザグリ（ネジ頭用の凹み）
+        counterbore_diameter = mm(7)  # M3ネジ頭用（6mm + 余裕）
+        counterbore_depth = mm(3)     # ネジ頭の高さ分
 
         # 配置位置（ESP32は縦向き: widthがX方向）
         esp32_x = -floor_length/2 + mm(5) + esp32_width/2
@@ -50,7 +59,7 @@ def run(context):
         extrudes = rootComp.features.extrudeFeatures
 
         # ============================================
-        # 1. 床板ベース
+        # 1. 床板ベース（5mm厚）
         # ============================================
         sketch1 = sketches.add(xyPlane)
         sketch1.sketchCurves.sketchLines.addTwoPointRectangle(
@@ -168,7 +177,53 @@ def run(context):
         extrudes.add(ext_c)
 
         # ============================================
-        # 6. ESP32のピン用穴（左右2列）
+        # 6. スペーサー用長穴（中央に2本）
+        # ============================================
+        for dx in [-1, 1]:
+            sketch_spacer = sketches.add(xyPlane)
+            slot_x = dx * spacer_slot_spacing / 2
+            sketch_spacer.sketchCurves.sketchLines.addTwoPointRectangle(
+                adsk.core.Point3D.create(slot_x - spacer_slot_width/2, -spacer_slot_length/2, 0),
+                adsk.core.Point3D.create(slot_x + spacer_slot_width/2, spacer_slot_length/2, 0)
+            )
+            prof_spacer = sketch_spacer.profiles.item(0)
+            ext_spacer = extrudes.createInput(prof_spacer, adsk.fusion.FeatureOperations.CutFeatureOperation)
+            ext_spacer.setDistanceExtent(False, adsk.core.ValueInput.createByReal(floor_thickness + mm(1)))
+            extrudes.add(ext_spacer)
+
+        # ============================================
+        # 7. 電池ボックス下のザグリ（ネジ頭用の凹み）
+        # ============================================
+        # 電池ボックスエリア内でスペーサー長穴と重なる位置
+        # 右側の長穴（+22mm）が電池ボックスエリア（左端約+17mm）にかぶる
+        # XY平面から上に向かって（floor_thickness - counterbore_depth）だけ押し出して
+        # 残りの部分を凹みとして残す方式ではなく、
+        # 長穴の周りに段差をつける（長穴を広げる形でザグリ）
+
+        # 右側のスペーサー長穴位置（電池ボックスとかぶる）
+        right_slot_x = spacer_slot_spacing / 2  # +22mm
+
+        # ザグリ用の広い長穴を上面から counterbore_depth 分だけカット
+        # まず上面に構築平面を作成
+        planes = rootComp.constructionPlanes
+        planeInput = planes.createInput()
+        offsetValue = adsk.core.ValueInput.createByReal(floor_thickness - counterbore_depth)
+        planeInput.setByOffset(xyPlane, offsetValue)
+        zaguri_plane = planes.add(planeInput)
+
+        sketch_zag = sketches.add(zaguri_plane)
+        zaguri_margin = mm(2)
+        sketch_zag.sketchCurves.sketchLines.addTwoPointRectangle(
+            adsk.core.Point3D.create(right_slot_x - counterbore_diameter/2, -spacer_slot_length/2 - zaguri_margin, 0),
+            adsk.core.Point3D.create(right_slot_x + counterbore_diameter/2, spacer_slot_length/2 + zaguri_margin, 0)
+        )
+        prof_zag = sketch_zag.profiles.item(0)
+        ext_zag = extrudes.createInput(prof_zag, adsk.fusion.FeatureOperations.CutFeatureOperation)
+        ext_zag.setDistanceExtent(False, adsk.core.ValueInput.createByReal(counterbore_depth + mm(1)))
+        extrudes.add(ext_zag)
+
+        # ============================================
+        # 8. ESP32のピン用穴（左右2列）
         # ============================================
         # ESP32は縦向き（Y方向に57mm）、ピンは左右の端に沿って並ぶ
         pin_hole_length = esp32_length - mm(4)  # Y方向の長さ（53mm）
@@ -199,11 +254,13 @@ def run(context):
         extrudes.add(ext_pin_r)
 
         ui.messageBox('Floor Plate created!\n\n' +
-                     '- Floor: 180x80x3mm\n' +
+                     '- Floor: 180x80x5mm\n' +
                      '- ESP32 holder (vertical)\n' +
                      '- Battery box holder\n' +
                      '- Motor driver M3 holes\n' +
-                     '- Cable routing hole\n\n' +
+                     '- Cable routing hole\n' +
+                     '- Spacer slots (44mm apart, 60mm long)\n' +
+                     '- Counterbore for screw heads under battery\n\n' +
                      '爪は後でFusion 360のGUIで追加してください')
 
     except:
