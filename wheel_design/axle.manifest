@@ -1,0 +1,10 @@
+{
+    "autodeskProduct": "Fusion",
+    "type": "script",
+    "author": "",
+    "description": {
+        "": "Front Axle for RC Car - 5mm diameter, 40mm length with stopper"
+    },
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}

@@ -1,0 +1,10 @@
+{
+    "autodeskProduct": "Fusion",
+    "type": "script",
+    "author": "",
+    "description": {
+        "": "Axle Holder for RC Car - Tube with mounting flange"
+    },
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}

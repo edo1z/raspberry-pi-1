@@ -1,0 +1,10 @@
+{
+    "autodeskProduct": "Fusion",
+    "type": "script",
+    "author": "",
+    "description": {
+        "": "Chassis for RC Car - Base plate with mounting holes"
+    },
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}
