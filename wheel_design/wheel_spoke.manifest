@@ -1,0 +1,10 @@
+{
+    "autodeskProduct": "Fusion",
+    "type": "script",
+    "author": "",
+    "description": {
+        "": "Spoke Wheel for RC Car - 51mm diameter, 5mm axle hole"
+    },
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}
