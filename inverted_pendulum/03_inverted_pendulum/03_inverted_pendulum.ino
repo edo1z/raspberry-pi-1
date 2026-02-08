@@ -3,6 +3,7 @@
  * ESP32 + DRV8833 + MPU6050
  *
  * ESP32 Arduino Core 3.x対応版
+ * ライブラリ不要版（直接I2C通信）
  *
  * 接続:
  *   モーター (DRV8833):
@@ -17,13 +18,15 @@
  *     GPIO22 → SCL
  *     3.3V   → VCC
  *     GND    → GND
- *
- * ライブラリ:
- *   MPU6050 (by Electronic Cats)
  */
 
 #include <Wire.h>
-#include <MPU6050.h>
+
+// ========== MPU6050設定 ==========
+#define MPU6050_ADDR 0x68
+#define PWR_MGMT_1   0x6B
+#define ACCEL_XOUT_H 0x3B
+#define WHO_AM_I     0x75
 
 // ========== ピン定義 ==========
 #define AIN1 16
@@ -45,7 +48,6 @@ float Kd = 1.5;    // 微分ゲイン
 float targetAngle = 0.0;  // バランス点（度）※要調整
 
 // ========== センサー・制御変数 ==========
-MPU6050 mpu;
 float angle = 0;
 float prevAngle = 0;
 float integral = 0;
@@ -62,6 +64,7 @@ const float SAFETY_ANGLE = 45.0;
 
 void setup() {
   Serial.begin(115200);
+  delay(1000);
   Serial.println("Inverted Pendulum Start!");
 
   // ESP32 Arduino Core 3.x: ledcAttach(pin, freq, resolution)
@@ -75,15 +78,34 @@ void setup() {
   // I2C初期化
   Wire.begin(21, 22);
 
-  // MPU6050初期化
+  // MPU6050の存在確認
   Serial.println("Initializing MPU6050...");
-  mpu.initialize();
+  Wire.beginTransmission(MPU6050_ADDR);
+  Wire.write(WHO_AM_I);
+  Wire.endTransmission(false);
+  Wire.requestFrom(MPU6050_ADDR, 1);
 
-  if (!mpu.testConnection()) {
-    Serial.println("MPU6050 connection failed!");
+  if (Wire.available()) {
+    byte whoami = Wire.read();
+    Serial.print("WHO_AM_I: 0x");
+    Serial.println(whoami, HEX);
+
+    if (whoami == 0x68 || whoami == 0x98) {
+      Serial.println("MPU6050 OK!");
+    } else {
+      Serial.println("Unknown device!");
+      while (1);
+    }
+  } else {
+    Serial.println("MPU6050 not responding!");
     while (1);
   }
-  Serial.println("MPU6050 OK!");
+
+  // MPU6050をスリープ解除
+  Wire.beginTransmission(MPU6050_ADDR);
+  Wire.write(PWR_MGMT_1);
+  Wire.write(0x00);
+  Wire.endTransmission();
 
   // キャリブレーション待ち
   Serial.println("Place robot upright and wait...");
@@ -105,8 +127,18 @@ void loop() {
   prevTime = currentTime;
 
   // ========== 角度取得 ==========
-  int16_t ax, ay, az, gx, gy, gz;
-  mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
+  Wire.beginTransmission(MPU6050_ADDR);
+  Wire.write(ACCEL_XOUT_H);
+  Wire.endTransmission(false);
+  Wire.requestFrom(MPU6050_ADDR, 14);
+
+  int16_t ax = (Wire.read() << 8) | Wire.read();
+  int16_t ay = (Wire.read() << 8) | Wire.read();
+  int16_t az = (Wire.read() << 8) | Wire.read();
+  int16_t temp = (Wire.read() << 8) | Wire.read();  // 温度（未使用）
+  int16_t gx = (Wire.read() << 8) | Wire.read();
+  int16_t gy = (Wire.read() << 8) | Wire.read();
+  int16_t gz = (Wire.read() << 8) | Wire.read();
 
   // 加速度から角度
   float accelAngle = atan2(ay, az) * 180.0 / PI;
