@@ -67,15 +67,7 @@ void setup() {
   delay(1000);
   Serial.println("Inverted Pendulum Start!");
 
-  // ESP32 Arduino Core 3.x: ledcAttach(pin, freq, resolution)
-  ledcAttach(AIN1, PWM_FREQ, PWM_RESOLUTION);
-  ledcAttach(AIN2, PWM_FREQ, PWM_RESOLUTION);
-  ledcAttach(BIN1, PWM_FREQ, PWM_RESOLUTION);
-  ledcAttach(BIN2, PWM_FREQ, PWM_RESOLUTION);
-
-  stopMotors();
-
-  // I2C初期化
+  // I2C初期化（PWMより先に行う）
   Wire.begin(21, 22);
 
   // MPU6050の存在確認
@@ -90,11 +82,11 @@ void setup() {
     Serial.print("WHO_AM_I: 0x");
     Serial.println(whoami, HEX);
 
-    if (whoami == 0x68 || whoami == 0x98) {
+    // 0x68=MPU6050, 0x70=MPU6050互換, 0x98=MPU6050, 0x71=MPU6500
+    if (whoami == 0x68 || whoami == 0x70 || whoami == 0x98 || whoami == 0x71) {
       Serial.println("MPU6050 OK!");
     } else {
-      Serial.println("Unknown device!");
-      while (1);
+      Serial.println("Unknown device, but trying anyway...");
     }
   } else {
     Serial.println("MPU6050 not responding!");
@@ -106,6 +98,15 @@ void setup() {
   Wire.write(PWR_MGMT_1);
   Wire.write(0x00);
   Wire.endTransmission();
+
+  // ESP32 Arduino Core 3.x: ledcAttach(pin, freq, resolution)
+  // I2C初期化後にPWM設定
+  ledcAttach(AIN1, PWM_FREQ, PWM_RESOLUTION);
+  ledcAttach(AIN2, PWM_FREQ, PWM_RESOLUTION);
+  ledcAttach(BIN1, PWM_FREQ, PWM_RESOLUTION);
+  ledcAttach(BIN2, PWM_FREQ, PWM_RESOLUTION);
+
+  stopMotors();
 
   // キャリブレーション待ち
   Serial.println("Place robot upright and wait...");

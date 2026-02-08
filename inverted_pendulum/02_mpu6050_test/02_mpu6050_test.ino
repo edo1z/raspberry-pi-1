@@ -45,10 +45,11 @@ void setup() {
     Serial.print("WHO_AM_I: 0x");
     Serial.println(whoami, HEX);
 
-    if (whoami == 0x68 || whoami == 0x98) {
+    // 0x68=MPU6050, 0x70=MPU6050互換, 0x98=MPU6050, 0x71=MPU6500
+    if (whoami == 0x68 || whoami == 0x70 || whoami == 0x98 || whoami == 0x71) {
       Serial.println("MPU6050 OK!");
     } else {
-      Serial.println("Unknown device!");
+      Serial.println("Unknown device, but trying anyway...");
     }
   } else {
     Serial.println("MPU6050 not responding!");
