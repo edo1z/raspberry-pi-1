@@ -1,5 +1,5 @@
 # Fusion 360 スクリプト - 前輪用軸（Axle）
-# 短い軸をホイールごとに使用
+# 両端ストッパー付き - 軸受けとホイールから抜けない設計
 
 import adsk.core, adsk.fusion, adsk.cam, traceback, math
 
@@ -13,7 +13,7 @@ def run(context):
 
         # === パラメータ設定（mm） ===
         axle_diameter = 5        # 軸の直径
-        axle_length = 40         # 軸の長さ（ホイール25mm + 軸受け10mm + 余裕5mm）
+        axle_length = 40         # 軸の長さ（ホイール25mm + 軸受け15mm）
         stopper_diameter = 8     # ストッパーの直径
         stopper_thickness = 2    # ストッパーの厚み
 
@@ -42,21 +42,35 @@ def run(context):
         extInput.setDistanceExtent(False, adsk.core.ValueInput.createByReal(axle_len))
         extrudes.add(extInput)
 
-        # ========== ストッパー（端）を作成 ==========
-        # 軸の端にストッパーを付ける（抜け防止）
+        # ========== 内側ストッパー（原点側 = シャーシ/軸受け側）==========
         sketch2 = sketches.add(xyPlane)
         sketch2.sketchCurves.sketchCircles.addByCenterRadius(centerPoint, stopper_r)
 
-        stopperProfile = sketch2.profiles.item(0)
-        extInput2 = extrudes.createInput(stopperProfile, adsk.fusion.FeatureOperations.JoinFeatureOperation)
+        stopperProfile1 = sketch2.profiles.item(0)
+        extInput2 = extrudes.createInput(stopperProfile1, adsk.fusion.FeatureOperations.JoinFeatureOperation)
         extInput2.setDistanceExtent(False, adsk.core.ValueInput.createByReal(stopper_t))
         extrudes.add(extInput2)
+
+        # ========== 外側ストッパー（軸の反対端 = ホイール外側）==========
+        # 軸の端にオフセット平面を作成
+        planes = axleComp.constructionPlanes
+        planeInput = planes.createInput()
+        planeInput.setByOffset(xyPlane, adsk.core.ValueInput.createByReal(axle_len - stopper_t))
+        endPlane = planes.add(planeInput)
+
+        sketch3 = sketches.add(endPlane)
+        sketch3.sketchCurves.sketchCircles.addByCenterRadius(centerPoint, stopper_r)
+
+        stopperProfile2 = sketch3.profiles.item(0)
+        extInput3 = extrudes.createInput(stopperProfile2, adsk.fusion.FeatureOperations.JoinFeatureOperation)
+        extInput3.setDistanceExtent(False, adsk.core.ValueInput.createByReal(stopper_t))
+        extrudes.add(extInput3)
 
         # ビューをフィット
         viewport = app.activeViewport
         viewport.fit()
 
-        ui.messageBox(f'前輪用軸（Axle）完成！\n\n軸直径: {axle_diameter}mm\n軸長さ: {axle_length}mm\nストッパー直径: {stopper_diameter}mm\n\nコンポーネント名: Axle_Front')
+        ui.messageBox(f'前輪用軸（両端ストッパー付き）完成！\n\n軸直径: {axle_diameter}mm\n軸長さ: {axle_length}mm\nストッパー直径: {stopper_diameter}mm\nストッパー厚み: {stopper_thickness}mm（両端）\n\n内側: 軸受けに引っかかる\n外側: ホイールに引っかかる\n\nコンポーネント名: Axle_Front')
 
     except:
         if ui:
