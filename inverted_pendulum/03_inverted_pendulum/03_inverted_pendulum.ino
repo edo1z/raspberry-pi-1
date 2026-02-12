@@ -21,6 +21,9 @@
  */
 
 #include <Wire.h>
+#include "BluetoothSerial.h"
+
+BluetoothSerial BT;
 
 // ========== MPU6050設定 ==========
 #define MPU6050_ADDR 0x68
@@ -62,10 +65,55 @@ const int CONTROL_PERIOD_MS = 10;  // 100Hz
 // 安全停止角度
 const float SAFETY_ANGLE = 45.0;
 
+// シリアルコマンド用バッファ
+String inputBuffer = "";
+
+// USB・BT両方に出力するヘルパー
+void out(const String &s) {
+  Serial.print(s);
+  BT.print(s);
+}
+void outln(const String &s) {
+  Serial.println(s);
+  BT.println(s);
+}
+
+void printParams() {
+  outln("--- Current PID ---");
+  out("  Kp="); outln(String(Kp, 2));
+  out("  Ki="); outln(String(Ki, 2));
+  out("  Kd="); outln(String(Kd, 2));
+  out("  target="); outln(String(targetAngle, 2));
+  outln("Commands: P30.0  I0.5  D1.5  T-2.0  S(show)");
+}
+
+void processCommand(String cmd) {
+  cmd.trim();
+  if (cmd.length() == 0) return;
+
+  char type = cmd.charAt(0);
+  float val = cmd.substring(1).toFloat();
+
+  switch (type) {
+    case 'P': case 'p': Kp = val; break;
+    case 'I': case 'i': Ki = val; break;
+    case 'D': case 'd': Kd = val; break;
+    case 'T': case 't': targetAngle = val; break;
+    case 'S': case 's': break;
+    default:
+      outln("Unknown command");
+      return;
+  }
+  integral = 0;  // パラメータ変更時に積分リセット
+  printParams();
+}
+
 void setup() {
   Serial.begin(115200);
+  BT.begin("BalanceBot");  // Bluetoothデバイス名
   delay(1000);
   Serial.println("Inverted Pendulum Start!");
+  Serial.println("Bluetooth: \"BalanceBot\"");
 
   // I2C初期化（PWMより先に行う）
   Wire.begin(21, 22);
@@ -113,10 +161,32 @@ void setup() {
   delay(3000);
 
   prevTime = millis();
+  printParams();
   Serial.println("GO!");
 }
 
 void loop() {
+  // シリアルコマンド受信（USB）
+  while (Serial.available()) {
+    char c = Serial.read();
+    if (c == '\n' || c == '\r') {
+      processCommand(inputBuffer);
+      inputBuffer = "";
+    } else {
+      inputBuffer += c;
+    }
+  }
+  // シリアルコマンド受信（Bluetooth）
+  while (BT.available()) {
+    char c = BT.read();
+    if (c == '\n' || c == '\r') {
+      processCommand(inputBuffer);
+      inputBuffer = "";
+    } else {
+      inputBuffer += c;
+    }
+  }
+
   unsigned long currentTime = millis();
 
   // 制御周期チェック
@@ -153,7 +223,7 @@ void loop() {
   // ========== 安全チェック ==========
   if (abs(angle - targetAngle) > SAFETY_ANGLE) {
     stopMotors();
-    Serial.println("!! SAFETY STOP !!");
+    outln("!! SAFETY STOP !!");
     delay(500);
     return;
   }
@@ -176,16 +246,12 @@ void loop() {
   int motorPWM = constrain((int)output, -255, 255);
 
   // ========== モーター駆動 ==========
-  setMotors(motorPWM, motorPWM);
+  setMotors(-motorPWM, motorPWM);
 
   // ========== デバッグ出力 ==========
-  Serial.print("Angle:");
-  Serial.print(angle, 1);
-  Serial.print(" Err:");
-  Serial.print(error, 1);
-  Serial.print(" Out:");
-  Serial.print(motorPWM);
-  Serial.println();
+  String dbg = "Angle:" + String(angle, 1) + " Err:" + String(error, 1) + " Out:" + String(motorPWM);
+  Serial.println(dbg);
+  BT.println(dbg);
 }
 
 /**
