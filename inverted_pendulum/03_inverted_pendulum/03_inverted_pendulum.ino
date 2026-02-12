@@ -4,7 +4,7 @@
  *
  * ESP32 Arduino Core 3.x対応版
  * ライブラリ不要版（直接I2C通信）
- * Wi-Fiアクセスポイント経由でPIDチューニング
+ * Wi-Fiアクセスポイント経由でPIDチューニング＆ラジコン操作
  *
  * 接続:
  *   モーター (DRV8833):
@@ -22,7 +22,8 @@
  *
  * 使い方:
  *   1. iPhoneのWi-Fi設定で「BalanceBot」に接続（パスワード: 12345678）
- *   2. Safariで http://192.168.4.1 を開く
+ *   2. Safariで http://192.168.4.1 → PIDチューニング
+ *   3. Safariで http://192.168.4.1/rc → ラジコン操作
  */
 
 #include <Wire.h>
@@ -52,12 +53,19 @@ WebServer server(80);
 #define PWM_RESOLUTION 8
 
 // ========== PIDパラメータ ==========
-float Kp = 30.0;
-float Ki = 0.5;
-float Kd = 1.5;
+float Kp = 42.0;
+float Ki = 2.1;
+float Kd = 2.5;
 
 // ========== 目標角度 ==========
-float targetAngle = 0.0;
+float targetAngle = 0.0;    // PID画面で設定するバランス点
+float baseTargetAngle = 0.0; // バランス点の基準値
+
+// ========== ラジコン操作 ==========
+float rcForward = 0.0;   // 前後 -1.0 ~ 1.0 (前進が正)
+float rcTurn = 0.0;      // 旋回 -1.0 ~ 1.0 (右が正)
+float RC_ANGLE_MAX = 3.0;   // 前後操作で傾ける最大角度
+float RC_TURN_SPEED = 80.0; // 旋回時の左右モーター速度差
 
 // ========== センサー・制御変数 ==========
 float angle = 0;
@@ -72,14 +80,14 @@ const float SAFETY_ANGLE = 45.0;
 // シリアルコマンド用バッファ
 String inputBuffer = "";
 
-// ========== Webページ ==========
+// ========== PIDチューニングページ ==========
 const char HTML_PAGE[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
 <html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>BalanceBot</title>
+<title>BalanceBot PID</title>
 <style>
 body{font-family:sans-serif;margin:16px;background:#1a1a2e;color:#eee}
 h2{text-align:center;color:#0ff}
@@ -93,23 +101,26 @@ input[type=range]{width:100%}
 button{background:#0ff;color:#000;border:none;padding:8px 16px;
   border-radius:4px;font-size:14px;margin:4px;cursor:pointer}
 button:active{background:#099}
+.nav{text-align:center;margin-bottom:12px}
+.nav a{color:#0ff;font-size:16px}
 </style>
 </head>
 <body>
-<h2>BalanceBot PID</h2>
+<div class="nav"><a href="/rc">RC Mode &gt;&gt;</a></div>
+<h2>PID Tuning</h2>
 <div class="p">
-  <label>Kp: <span id="vp" class="v">30.00</span></label>
-  <input type="range" id="sp" min="0" max="100" step="0.5" value="30"
+  <label>Kp: <span id="vp" class="v">42.00</span></label>
+  <input type="range" id="sp" min="0" max="100" step="0.5" value="42"
     oninput="document.getElementById('vp').textContent=this.value;send('P'+this.value)">
 </div>
 <div class="p">
-  <label>Ki: <span id="vi" class="v">0.50</span></label>
-  <input type="range" id="si" min="0" max="10" step="0.1" value="0.5"
+  <label>Ki: <span id="vi" class="v">2.10</span></label>
+  <input type="range" id="si" min="0" max="10" step="0.1" value="2.1"
     oninput="document.getElementById('vi').textContent=this.value;send('I'+this.value)">
 </div>
 <div class="p">
-  <label>Kd: <span id="vd" class="v">1.50</span></label>
-  <input type="range" id="sd" min="0" max="20" step="0.1" value="1.5"
+  <label>Kd: <span id="vd" class="v">2.50</span></label>
+  <input type="range" id="sd" min="0" max="20" step="0.1" value="2.5"
     oninput="document.getElementById('vd').textContent=this.value;send('D'+this.value)">
 </div>
 <div class="p">
@@ -137,6 +148,116 @@ init();
 </html>
 )rawliteral";
 
+// ========== ラジコン操作ページ ==========
+const char RC_PAGE[] PROGMEM = R"rawliteral(
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>BalanceBot RC</title>
+<style>
+*{box-sizing:border-box;-webkit-user-select:none;user-select:none}
+body{font-family:sans-serif;margin:0;padding:16px;background:#1a1a2e;color:#eee;
+  overflow:hidden;touch-action:none}
+h2{text-align:center;color:#0ff;margin:8px 0}
+.nav{text-align:center;margin-bottom:8px}
+.nav a{color:#0ff;font-size:16px}
+#status{text-align:center;font-size:14px;color:#0f0;margin:4px 0}
+#pad{position:relative;width:280px;height:280px;margin:16px auto;
+  background:radial-gradient(circle,#223 0%,#112 100%);
+  border:2px solid #0ff;border-radius:50%}
+#stick{position:absolute;width:70px;height:70px;background:radial-gradient(circle,#0ff,#066);
+  border-radius:50%;left:105px;top:105px;pointer-events:none;
+  box-shadow:0 0 15px #0ff}
+#arrows{position:absolute;width:100%;height:100%;top:0;left:0;pointer-events:none}
+#arrows span{position:absolute;font-size:24px;color:rgba(0,255,255,0.3)}
+#au{top:12px;left:50%;transform:translateX(-50%)}
+#ad{bottom:12px;left:50%;transform:translateX(-50%)}
+#al{left:12px;top:50%;transform:translateY(-50%)}
+#ar{right:12px;top:50%;transform:translateY(-50%)}
+#info{text-align:center;font-size:13px;margin-top:8px;color:#888}
+</style>
+</head>
+<body>
+<div class="nav"><a href="/">&lt;&lt; PID Tuning</a></div>
+<h2>RC Mode</h2>
+<div id="status">Angle: -- | Output: --</div>
+<div id="pad">
+  <div id="arrows">
+    <span id="au">&uarr;</span>
+    <span id="ad">&darr;</span>
+    <span id="al">&larr;</span>
+    <span id="ar">&rarr;</span>
+  </div>
+  <div id="stick"></div>
+</div>
+<div id="info">Drag to move</div>
+<script>
+var pad=document.getElementById('pad');
+var stick=document.getElementById('stick');
+var cx=140,cy=140,maxR=105;
+var touching=false,tid=null;
+var curFwd=0,curTurn=0;
+
+function pos(px,py){
+  var dx=px-cx,dy=py-cy;
+  var dist=Math.sqrt(dx*dx+dy*dy);
+  if(dist>maxR){dx=dx/dist*maxR;dy=dy/dist*maxR;}
+  stick.style.left=(cx+dx-35)+'px';
+  stick.style.top=(cy+dy-35)+'px';
+  curFwd=(-dy/maxR);
+  curTurn=(dx/maxR);
+  curFwd=Math.round(curFwd*100)/100;
+  curTurn=Math.round(curTurn*100)/100;
+}
+
+function reset(){
+  stick.style.left='105px';stick.style.top='105px';
+  curFwd=0;curTurn=0;
+  sendRC();
+}
+
+function sendRC(){fetch('/steer?f='+curFwd+'&t='+curTurn);}
+
+function getXY(e){
+  var r=pad.getBoundingClientRect();
+  var t=e.touches?e.touches[0]:e;
+  return{x:t.clientX-r.left,y:t.clientY-r.top};
+}
+
+pad.addEventListener('touchstart',function(e){
+  e.preventDefault();touching=true;
+  var p=getXY(e);pos(p.x,p.y);sendRC();
+  if(!tid)tid=setInterval(sendRC,100);
+});
+pad.addEventListener('touchmove',function(e){
+  e.preventDefault();if(!touching)return;
+  var p=getXY(e);pos(p.x,p.y);
+});
+pad.addEventListener('touchend',function(e){
+  e.preventDefault();touching=false;reset();
+  if(tid){clearInterval(tid);tid=null;}
+});
+pad.addEventListener('mousedown',function(e){
+  touching=true;var p=getXY(e);pos(p.x,p.y);sendRC();
+  if(!tid)tid=setInterval(sendRC,100);
+});
+document.addEventListener('mousemove',function(e){
+  if(!touching)return;var p=getXY(e);pos(p.x,p.y);
+});
+document.addEventListener('mouseup',function(){
+  if(!touching)return;touching=false;reset();
+  if(tid){clearInterval(tid);tid=null;}
+});
+
+var es=new EventSource('/events');
+es.onmessage=function(e){document.getElementById('status').textContent=e.data;};
+</script>
+</body>
+</html>
+)rawliteral";
+
 // SSE クライアント
 WiFiClient sseClient;
 bool sseConnected = false;
@@ -152,7 +273,7 @@ void processCommand(String cmd) {
     case 'P': case 'p': Kp = val; break;
     case 'I': case 'i': Ki = val; break;
     case 'D': case 'd': Kd = val; break;
-    case 'T': case 't': targetAngle = val; break;
+    case 'T': case 't': baseTargetAngle = val; break;
     case 'S': case 's': break;
     default:
       Serial.println("Unknown command");
@@ -163,10 +284,9 @@ void processCommand(String cmd) {
   Serial.print("  Kp="); Serial.println(Kp, 2);
   Serial.print("  Ki="); Serial.println(Ki, 2);
   Serial.print("  Kd="); Serial.println(Kd, 2);
-  Serial.print("  target="); Serial.println(targetAngle, 2);
+  Serial.print("  target="); Serial.println(baseTargetAngle, 2);
 }
 
-// SSEでデータ送信
 void sendSSE(const String &data) {
   if (sseConnected && sseClient.connected()) {
     sseClient.print("data: ");
@@ -182,10 +302,20 @@ void handleRoot() {
   server.send(200, "text/html", HTML_PAGE);
 }
 
+void handleRC() {
+  server.send(200, "text/html", RC_PAGE);
+}
+
 void handleCmd() {
   if (server.hasArg("c")) {
     processCommand(server.arg("c"));
   }
+  server.send(200, "text/plain", "OK");
+}
+
+void handleSteer() {
+  if (server.hasArg("f")) rcForward = constrain(server.arg("f").toFloat(), -1.0, 1.0);
+  if (server.hasArg("t")) rcTurn = constrain(server.arg("t").toFloat(), -1.0, 1.0);
   server.send(200, "text/plain", "OK");
 }
 
@@ -197,7 +327,7 @@ void handleEvents() {
   sseClient.println("Connection: keep-alive");
   sseClient.println("Access-Control-Allow-Origin: *");
   sseClient.println();
-  sseClient.flush();
+  sseClient.clear();
   sseConnected = true;
 }
 
@@ -215,7 +345,9 @@ void setup() {
 
   // Webサーバー設定
   server.on("/", handleRoot);
+  server.on("/rc", handleRC);
   server.on("/cmd", handleCmd);
+  server.on("/steer", handleSteer);
   server.on("/events", handleEvents);
   server.begin();
 
@@ -264,12 +396,13 @@ void setup() {
   prevTime = millis();
   Serial.println("GO!");
   Serial.println("Connect to Wi-Fi 'BalanceBot' (pass: 12345678)");
-  Serial.println("Then open http://192.168.4.1");
+  Serial.println("  PID:  http://192.168.4.1");
+  Serial.println("  RC:   http://192.168.4.1/rc");
 }
 
 // デバッグ出力の間引き用
 unsigned long lastSSETime = 0;
-const int SSE_INTERVAL_MS = 100;  // 10Hz でブラウザに送信
+const int SSE_INTERVAL_MS = 100;
 
 void loop() {
   // Webサーバー処理
@@ -295,6 +428,9 @@ void loop() {
 
   float dt = (currentTime - prevTime) / 1000.0;
   prevTime = currentTime;
+
+  // ========== ラジコン操作を目標角度に反映 ==========
+  targetAngle = baseTargetAngle + rcForward * RC_ANGLE_MAX;
 
   // ========== 角度取得 ==========
   Wire.beginTransmission(MPU6050_ADDR);
@@ -335,14 +471,18 @@ void loop() {
   float output = Kp * error + Ki * integral + Kd * derivative;
   int motorPWM = constrain((int)output, -255, 255);
 
+  // ========== 旋回を加える ==========
+  int turnOffset = (int)(rcTurn * RC_TURN_SPEED);
+  int motorA = constrain(-motorPWM - turnOffset, -255, 255);
+  int motorB = constrain( motorPWM - turnOffset, -255, 255);
+
   // ========== モーター駆動 ==========
-  setMotors(-motorPWM, motorPWM);
+  setMotors(motorA, motorB);
 
   // ========== デバッグ出力 ==========
   String dbg = "Angle:" + String(angle, 1) + " Err:" + String(error, 1) + " Out:" + String(motorPWM);
   Serial.println(dbg);
 
-  // SSEは間引いて送信（制御ループを遅くしない）
   if (currentTime - lastSSETime >= SSE_INTERVAL_MS) {
     sendSSE(dbg);
     lastSSETime = currentTime;
